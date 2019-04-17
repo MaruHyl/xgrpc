@@ -1,12 +1,7 @@
 # xgrpc
-grpc-pool, especially for kit factory
+grpc connection manager, especially for kit factory
 
 Ref: https://github.com/go-kit/kit/blob/master/examples/apigateway/main.go#L184
-
-## Feature
-- reuse one `Conn` per `addr`, `Conn` is a interface, it also can be a `pool` or 
-something
-- ref counting in `defaultConn`
 
 ## Example
 
