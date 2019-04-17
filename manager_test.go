@@ -3,15 +3,12 @@ package xgrpc
 import (
 	"context"
 	"fmt"
-	"github.com/MaruHyl/kit/examples/addsvc/pkg/addtransport"
-	"io"
 	"net"
 	"sync"
 	"testing"
 	"time"
 
 	"google.golang.org/grpc"
-
 	"github.com/stretchr/testify/require"
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
 )
@@ -32,21 +29,44 @@ func TestManager(t *testing.T) {
 		servers[i] = server{s, lis}
 	}
 
-	// tests
 	var wg sync.WaitGroup
-	t.Parallel()
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		t.Run(fmt.Sprintf("test-%d", i), func(t *testing.T) {
-			defer wg.Done()
-			for _, s := range servers {
-				c, err := m.GetConn(ctx, s.lis.Addr().String())
-				require.NoError(t, err)
-				testConn(t, ctx, c)
-			}
-		})
-	}
-	wg.Wait()
+
+	t.Run("normal cases", func(t *testing.T) {
+		for i := 0; i < 12; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				for _, s := range servers {
+					addr := s.lis.Addr().String()
+					c, err := m.GetConn(ctx, addr)
+					require.NoError(t, err)
+					testConn(t, ctx, c, fmt.Sprintf("%d-%s", i, addr))
+				}
+			}(i)
+		}
+		wg.Wait()
+	})
+
+	t.Run("closed Conn cases", func(t *testing.T) {
+		for _, s := range servers {
+			c, err := m.GetConn(ctx, s.lis.Addr().String())
+			require.NoError(t, err)
+			require.NoError(t, c.Close())
+		}
+		for i := 0; i < 12; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				for _, s := range servers {
+					addr := s.lis.Addr().String()
+					c, err := m.GetConn(ctx, addr)
+					require.NoError(t, err)
+					testConn(t, ctx, c, fmt.Sprintf("%d-%s", i, addr))
+				}
+			}(i)
+		}
+		wg.Wait()
+	})
 
 	for _, s := range servers {
 		s.s.GracefulStop()
@@ -57,14 +77,14 @@ func TestManager(t *testing.T) {
 	require.EqualError(t, err, ErrManagerClosed.Error())
 }
 
-func testConn(t *testing.T, ctx context.Context, c Conn) {
+func testConn(t *testing.T, ctx context.Context, c Conn, id string) {
 	conn, closer, err := c.Get(ctx)
 	require.NoError(t, err)
 	cli := pb.NewGreeterClient(conn)
 	resp, err := cli.SayHello(ctx, &pb.HelloRequest{Name: "test"})
 	require.NoError(t, err)
 	require.Equal(t, "Hello test", resp.Message)
-	t.Log(resp.Message)
+	t.Log(id, resp.Message)
 	// close multi-times
 	require.NoError(t, closer.Close())
 	require.NoError(t, closer.Close())

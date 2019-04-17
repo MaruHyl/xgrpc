@@ -2,7 +2,6 @@ package xgrpc
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"sync"
 	"testing"
@@ -53,12 +52,12 @@ func testDefaultConn(t *testing.T, s *grpc.Server, c Conn) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	// normal, test multi-goroutines
+	// normal cases, test multi-goroutines
 	t.Parallel()
 	var wg sync.WaitGroup
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 12; i++ {
 		wg.Add(1)
-		t.Run(fmt.Sprintf("conn-%d", i), func(t *testing.T) {
+		go func(i int) {
 			defer wg.Done()
 			conn, closer, err := c.Get(ctx)
 			require.NoError(t, err)
@@ -66,12 +65,12 @@ func testDefaultConn(t *testing.T, s *grpc.Server, c Conn) {
 			resp, err := cli.SayHello(ctx, &pb.HelloRequest{Name: "test"})
 			require.NoError(t, err)
 			require.Equal(t, "Hello test", resp.Message)
-			t.Log(resp.Message)
+			t.Log(i, resp.Message)
 			// close multi-times
 			require.NoError(t, closer.Close())
 			require.NoError(t, closer.Close())
 			require.NoError(t, closer.Close())
-		})
+		}(i)
 	}
 	wg.Wait()
 	require.Equal(t, 0, int(rc.ref.Load()))
@@ -79,7 +78,7 @@ func testDefaultConn(t *testing.T, s *grpc.Server, c Conn) {
 	// stop server
 	s.GracefulStop()
 
-	// error
+	// error cases
 	_, _, err := c.Get(ctx)
 	require.EqualError(t, err, ErrConnNotReady.Error())
 

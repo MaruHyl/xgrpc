@@ -41,12 +41,12 @@ func WithConnFunc(connFunc ConnFunc) ManagerOption {
 	}
 }
 
-// gRpc manager: 管理地址和conn的关系
+// Manage a Conn for an address
 type Manager struct {
+	managerOptions
 	rw      sync.RWMutex
 	connMap map[string]Conn
 	closed  bool
-	managerOptions
 }
 
 func NewManager(opts ...ManagerOption) *Manager {
@@ -55,12 +55,13 @@ func NewManager(opts ...ManagerOption) *Manager {
 		opt(&options)
 	}
 	return &Manager{
-		connMap:        make(map[string]Conn),
 		managerOptions: options,
+		connMap:        make(map[string]Conn),
 	}
 }
 
 func (m *Manager) GetConn(ctx context.Context, addr string) (conn Conn, err error) {
+	// fast-path
 	m.rw.RLock()
 	if m.closed {
 		m.rw.RUnlock()
@@ -70,18 +71,27 @@ func (m *Manager) GetConn(ctx context.Context, addr string) (conn Conn, err erro
 	conn, ok = m.connMap[addr]
 	m.rw.RUnlock()
 
+	if ok && !conn.IsClosed() {
+		return
+	}
+
+	// slow-path
 	m.rw.Lock()
 	defer m.rw.Unlock()
 
-	if !ok {
-		conn, ok = m.connMap[addr]
-		if !ok {
-			conn = m.connFunc(addr, m.dial)
-			m.connMap[addr] = conn
-		}
+	if m.closed {
+		return nil, ErrManagerClosed
 	}
 
-	return conn, nil
+	// double-check
+	conn, ok = m.connMap[addr]
+	if !ok || conn.IsClosed() {
+		// make Conn
+		conn = m.connFunc(addr, m.dial)
+		m.connMap[addr] = conn
+	}
+
+	return
 }
 
 func (m *Manager) Close() error {
@@ -93,6 +103,7 @@ func (m *Manager) Close() error {
 		for _, c := range m.connMap {
 			_ = c.Close()
 		}
+		m.connMap = nil
 	}
 	return nil
 }
